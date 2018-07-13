@@ -4153,7 +4153,7 @@ function blitBuffer (src, dst, offset, length) {
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 
 },{"16":16,"26":26,"6":6}],10:[function(_dereq_,module,exports){
-/*! codem-isoboxer v0.3.4 https://github.com/madebyhiro/codem-isoboxer/blob/master/LICENSE.txt */
+/*! codem-isoboxer v0.3.5 https://github.com/madebyhiro/codem-isoboxer/blob/master/LICENSE.txt */
 var ISOBoxer = {};
 
 ISOBoxer.parseBuffer = function(arrayBuffer) {
@@ -4609,14 +4609,26 @@ ISOBox.prototype._readTerminatedString = function() {
 
 ISOBox.prototype._readData = function(size) {
   var length = (size > 0) ? size : (this._raw.byteLength - (this._cursor.offset - this._offset));
-  var data = new DataView(this._raw.buffer, this._cursor.offset, length);
-  this._cursor.offset += length;
-  return data;
+  if (length > 0) {
+    var data = new Uint8Array(this._raw.buffer, this._cursor.offset, length);
+
+    this._cursor.offset += length;
+    return data;
+  }
+  else {
+    return null;
+  }
 };
 
 ISOBox.prototype._readUTF8String = function() {
-  var data = this._readData();
-  return ISOBoxer.Utils.dataViewToString(data);
+  var length = this._raw.byteLength - (this._cursor.offset - this._offset);
+  var data = null;
+  if (length > 0) {
+    data = new DataView(this._raw.buffer, this._cursor.offset, length);
+    this._cursor.offset += length;
+  }
+ 
+  return data ? ISOBoxer.Utils.dataViewToString(data) : data;
 };
 
 ISOBox.prototype._parseBox = function() {
@@ -4846,28 +4858,27 @@ ISOBox.prototype._writeTemplate = function(size, value) {
 
 ISOBox.prototype._writeData = function(data) {
   var i;
-  if (data instanceof Array) {
-    if (!Uint8Array.from) {
-      var typedArray = new Uint8Array(data.length);
-      for (i = 0; i < data.length; i++) {
-        typedArray[i] = data[i];
+  //data to copy
+  if (data) {
+    if (this._rawo) {
+      //Array and Uint8Array has also to be managed
+      if (data instanceof Array) {
+        var offset = this._cursor.offset - this._rawo.byteOffset;
+        for (var i = 0; i < data.length; i++) {
+          this._rawo.setInt8(offset + i, data[i]);
+        }
+        this._cursor.offset += data.length;
+      } 
+
+      if (data instanceof Uint8Array) {
+        this._root.bytes.set(data, this._cursor.offset);
+        this._cursor.offset += data.length;
       }
-      data = new DataView(typedArray.buffer);
+
     } else {
-      data = new DataView(Uint8Array.from(data).buffer);
+      //nothing to copy only size to compute
+      this.size += data.length;
     }
-  }
-  if (data instanceof Uint8Array) {
-    data = new DataView(data.buffer);
-  }
-  if (this._rawo) {
-    var offset = this._cursor.offset - this._rawo.byteOffset;
-    for (i = 0; i < data.byteLength; i++) {
-        this._rawo.setUint8(offset + i, data.getUint8(i));
-    }
-    this._cursor.offset += data.byteLength;
-  } else {
-    this.size += data.byteLength;
   }
 };
 
@@ -5856,7 +5867,7 @@ function isUndefined(arg) {
 },{}],16:[function(_dereq_,module,exports){
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   var e, m
-  var eLen = nBytes * 8 - mLen - 1
+  var eLen = (nBytes * 8) - mLen - 1
   var eMax = (1 << eLen) - 1
   var eBias = eMax >> 1
   var nBits = -7
@@ -5869,12 +5880,12 @@ exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   e = s & ((1 << (-nBits)) - 1)
   s >>= (-nBits)
   nBits += eLen
-  for (; nBits > 0; e = e * 256 + buffer[offset + i], i += d, nBits -= 8) {}
+  for (; nBits > 0; e = (e * 256) + buffer[offset + i], i += d, nBits -= 8) {}
 
   m = e & ((1 << (-nBits)) - 1)
   e >>= (-nBits)
   nBits += mLen
-  for (; nBits > 0; m = m * 256 + buffer[offset + i], i += d, nBits -= 8) {}
+  for (; nBits > 0; m = (m * 256) + buffer[offset + i], i += d, nBits -= 8) {}
 
   if (e === 0) {
     e = 1 - eBias
@@ -5889,7 +5900,7 @@ exports.read = function (buffer, offset, isLE, mLen, nBytes) {
 
 exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
   var e, m, c
-  var eLen = nBytes * 8 - mLen - 1
+  var eLen = (nBytes * 8) - mLen - 1
   var eMax = (1 << eLen) - 1
   var eBias = eMax >> 1
   var rt = (mLen === 23 ? Math.pow(2, -24) - Math.pow(2, -77) : 0)
@@ -5922,7 +5933,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
       m = 0
       e = eMax
     } else if (e + eBias >= 1) {
-      m = (value * c - 1) * Math.pow(2, mLen)
+      m = ((value * c) - 1) * Math.pow(2, mLen)
       e = e + eBias
     } else {
       m = value * Math.pow(2, eBias - 1) * Math.pow(2, mLen)
@@ -6047,8 +6058,8 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
                     for (c = 1; c < estack[0].contents.length; c++) {
 
-                        if (estack[0].contents[c] instanceof Span && estack[0].contents[c].anon &&
-                            cs[cs.length - 1] instanceof Span && cs[cs.length - 1].anon) {
+                        if (estack[0].contents[c] instanceof AnonymousSpan &&
+                            cs[cs.length - 1] instanceof AnonymousSpan) {
 
                             cs[cs.length - 1].text += estack[0].contents[c].text;
 
@@ -6068,12 +6079,11 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
                 if (estack[0] instanceof Span &&
                     estack[0].contents.length === 1 &&
-                    estack[0].contents[0] instanceof Span &&
-                    estack[0].contents[0].anon &&
+                    estack[0].contents[0] instanceof AnonymousSpan &&
                     estack[0].text === null) {
 
                     estack[0].text = estack[0].contents[0].text;
-                    estack[0].contents = [];
+                    delete estack[0].contents;
 
                 }
 
@@ -6122,8 +6132,10 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
             } else if (estack[0] instanceof Span || estack[0] instanceof P) {
 
                 /* create an anonymous span */
-
-                var s = Span.createAnonymousSpan(doc, estack[0], xmlspacestack[0], str, errorHandler);
+                
+                var s = new AnonymousSpan();
+              
+                s.initFromText(doc, estack[0], str, xmlspacestack[0], errorHandler);
 
                 estack[0].contents.push(s);
 
@@ -6700,7 +6712,6 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
         this.begin = null;
         this.end = null;
         this.styleAttrs = null;
-        this.contents = null;
         this.regionID = null;
         this.sets = null;
         this.timeContainer = null;
@@ -6717,8 +6728,6 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
         if (doc.head !== null && doc.head.styling !== null) {
             mergeReferencedStyles(doc.head.styling, elementGetStyleRefs(node), this.styleAttrs, errorHandler);
         }
-
-        this.contents = [];
 
         this.regionID = elementGetRegionID(node);
 
@@ -6738,6 +6747,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
     Body.prototype.initFromNode = function (doc, node, errorHandler) {
         ContentElement.prototype.initFromNode.call(this, doc, null, node, errorHandler);
+        this.contents = [];
     };
 
     /*
@@ -6750,6 +6760,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
     Div.prototype.initFromNode = function (doc, parent, node, errorHandler) {
         ContentElement.prototype.initFromNode.call(this, doc, parent, node, errorHandler);
+        this.contents = [];
     };
 
     /*
@@ -6762,6 +6773,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
     P.prototype.initFromNode = function (doc, parent, node, errorHandler) {
         ContentElement.prototype.initFromNode.call(this, doc, parent, node, errorHandler);
+        this.contents = [];
     };
 
     /*
@@ -6770,29 +6782,29 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
     function Span() {
         ContentElement.call(this, 'span');
-        this.text = null;
         this.space = null;
-        this.anon = null;
     }
 
     Span.prototype.initFromNode = function (doc, parent, node, xmlspace, errorHandler) {
         ContentElement.prototype.initFromNode.call(this, doc, parent, node, errorHandler);
-        this.text = null;
         this.space = xmlspace;
-        this.anon = false;
+        this.contents = [];
     };
-
-    Span.createAnonymousSpan = function (doc, parent, xmlspace, text, errorHandler) {
-
-        var s = new Span();
-
-        ContentElement.prototype.initFromNode.call(s, doc, parent, null, errorHandler);
-        s.text = text;
-        s.space = xmlspace;
-        s.anon = true;
-
-        return s;
-
+    
+    /*
+     * Represents a TTML anonymous span element
+     */
+    
+    function AnonymousSpan() {
+        ContentElement.call(this, 'span');
+        this.space = null;
+        this.text = null;
+    }
+    
+    AnonymousSpan.prototype.initFromText = function (doc, parent, text, xmlspace, errorHandler) {
+        ContentElement.prototype.initFromNode.call(this, doc, parent, null, errorHandler);
+        this.text = text;
+        this.space = xmlspace;
     };
 
     /*
@@ -7312,7 +7324,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
         if (parent) {
 
-            if (isseq && parent.contents.length > 0) {
+            if (isseq && 'contents' in parent && parent.contents.length > 0) {
 
                 /*
                  * if seq time container, offset from the previous sibling end
@@ -7567,7 +7579,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
     imscHTML.render = function (isd, element, imgResolver, eheight, ewidth, displayForcedOnlyMode, errorHandler) {
 
         /* maintain aspect ratio if specified */
-        
+
         var height = eheight || element.clientHeight;
         var width = ewidth || element.clientWidth;
 
@@ -7605,8 +7617,9 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
             regionH: null,
             regionW: null,
             imgResolver: imgResolver,
-            displayForcedOnlyMode : displayForcedOnlyMode || false,
-            isd: isd
+            displayForcedOnlyMode: displayForcedOnlyMode || false,
+            isd: isd,
+            errorHandler: errorHandler
         };
 
         element.appendChild(rootcontainer);
@@ -7650,6 +7663,14 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
             e = document.createElement("br");
 
+        }
+        
+        if (! e) {
+            
+            reportError(context.errorHandler, "Error processing ISD element kind: " + isd_element.kind);
+            
+            return;
+            
         }
 
         /* override UA default margin */
@@ -7733,112 +7754,14 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
         }
 
-        // handle linePadding and multirow Align
+        // handle linePadding and multiRowAlign
 
         if ((context.lp || context.mra) && isd_element.kind === "p") {
 
             var elist = [];
             
             constructElementList(proc_e, elist, "red");
-            
-            /* prune white space before and after BR */
-            /* NOTE: this addresses the issue at https://github.com/sandflow/imscJS/issues/27 */
-            
-            if (isd_element.space !== "preserve") {
-            
-                var l = 0;
-                
-                var state = "after_br";
-                var br_pos = 0;
-                var clean_str;
-            
-                while (true) {
-                    
-                    if (state === "after_br") {
-                        
-                        if (l >= elist.length || elist[l].element.localName === "br") {
-                            
-                            state = "before_br";
-                            br_pos = l;
-                            l--;
-                            
-                        } else {
-                            
-                            clean_str =  elist[l].element.textContent.replace(/^\s+/g, '');
-                            
-                            elist[l].element.textContent = clean_str;
-                            
-                            if (clean_str.length > 0) {
-                                
-                                state = "looking_br";
-                                l++;
-                                
-                            } else if (clean_str.length === 0) {
-                                
-                                elist[l].element.parentNode.removeChild(elist[l].element);
-                                elist.splice(l, 1);
-                                
-                            }
-                            
-                        }
-                        
-                        
-                    } else if (state === "before_br") {
-                        
-                        if (l < 0 || elist[l].element.localName === "br") {
-                            
-                            state = "after_br";
-                            l = br_pos + 1;
-                            
-                            if (l >= elist.length) break;
-                            
-                        } else {
-                            
-                            clean_str =  elist[l].element.textContent.replace(/\s+$/g, '');
-                            
-                            elist[l].element.textContent = clean_str;
-                            
-                            if (clean_str.length > 0) {
-                                
-                                state = "after_br";
-                                l = br_pos + 1;
-                                
-                                if (l >= elist.length) break;
-                                
-                            } else if (clean_str.length === 0) {
-                                
-                                elist[l].element.parentNode.removeChild(elist[l].element);
-                                elist.splice(l, 1);
-                                l--;
-                                
-                            }
-                            
-                        }
-                        
-                    } else {
-                        
-                        if (l >= elist.length || elist[l].element.localName === "br") {
-                            
-                            state = "before_br";
-                            br_pos = l;
-                            l--;
-                            
-                        } else {
-                            
-                            l++;
-                            
-                        }
-                        
-                    }
 
-                }
-                
-                /* remove empty spans */
-                
-                 pruneEmptySpans(proc_e);
-            
-            }
-            
             /* TODO: linePadding only supported for horizontal scripts */
 
             processLinePaddingAndMultiRowAlign(elist, context.lp * context.h);
@@ -7853,7 +7776,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
         }
 
     }
-    
+
     function pruneEmptySpans(element) {
 
         var child = element.firstChild;
@@ -7863,12 +7786,12 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
             var nchild = child.nextSibling;
 
             if (child.nodeType === Node.ELEMENT_NODE &&
-                    child.localName === 'span') {
+                child.localName === 'span') {
 
                 pruneEmptySpans(child);
 
                 if (child.childElementCount === 0 &&
-                        child.textContent.length === 0) {
+                    child.textContent.length === 0) {
 
                     element.removeChild(child);
 
@@ -7879,12 +7802,15 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
         }
 
     }
-        
+
     function constructElementList(element, elist, bgcolor) {
 
         if (element.childElementCount === 0) {
 
-            elist.push({"element": element, "bgcolor": bgcolor});
+            elist.push({
+                "element": element,
+                "bgcolor": bgcolor}
+                );
 
         } else {
 
@@ -7911,7 +7837,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
         var line_head = null;
 
         var lookingForHead = true;
-        
+
         var foundBR = false;
 
         for (var i = 0; i <= elist.length; i++) {
@@ -7922,27 +7848,27 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
             if (i !== elist.length && elist[i].element.localName === "br") {
                 foundBR = true;
-                continue;   
+                continue;
             }
 
             /* detect new line */
 
             if (line_head === null ||
-                    i === elist.length ||
-                    elist[i].element.getBoundingClientRect().top !== elist[line_head].element.getBoundingClientRect().top) {
+                i === elist.length ||
+                elist[i].element.getBoundingClientRect().top !== elist[line_head].element.getBoundingClientRect().top) {
 
                 /* apply right padding to previous line (if applicable and unless this is the first line) */
 
                 if (lp && (!lookingForHead)) {
 
-                    for (; --i >= 0;) {
+                    for (; --i >= 0; ) {
 
                         if (elist[i].element.getBoundingClientRect().width !== 0) {
 
                             addRightPadding(elist[i].element, elist[i].color, lp);
 
                             if (elist[i].element.getBoundingClientRect().width !== 0 &&
-                                    elist[i].element.getBoundingClientRect().top === elist[line_head].element.getBoundingClientRect().top)
+                                elist[i].element.getBoundingClientRect().top === elist[line_head].element.getBoundingClientRect().top)
                                 break;
 
                             removeRightPadding(elist[i].element);
@@ -7966,7 +7892,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
                     elist[i].element.parentElement.insertBefore(br, elist[i].element);
 
                     elist.splice(i, 0, {"element": br});
-                    
+
                     foundBR = true;
 
                     continue;
@@ -7991,7 +7917,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
                 }
 
                 lookingForHead = false;
-                
+
                 foundBR = false;
 
                 line_head = i;
@@ -8026,385 +7952,385 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
     var STYLING_MAP_DEFS = [
 
         new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling backgroundColor",
-                function (context, dom_element, isd_element, attr) {
-                    dom_element.style.backgroundColor = "rgba(" +
-                            attr[0].toString() + "," +
-                            attr[1].toString() + "," +
-                            attr[2].toString() + "," +
-                            (attr[3] / 255).toString() +
-                            ")";
+            "http://www.w3.org/ns/ttml#styling backgroundColor",
+            function (context, dom_element, isd_element, attr) {
+                dom_element.style.backgroundColor = "rgba(" +
+                    attr[0].toString() + "," +
+                    attr[1].toString() + "," +
+                    attr[2].toString() + "," +
+                    (attr[3] / 255).toString() +
+                    ")";
+            }
+        ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling color",
+            function (context, dom_element, isd_element, attr) {
+                dom_element.style.color = "rgba(" +
+                    attr[0].toString() + "," +
+                    attr[1].toString() + "," +
+                    attr[2].toString() + "," +
+                    (attr[3] / 255).toString() +
+                    ")";
+            }
+        ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling direction",
+            function (context, dom_element, isd_element, attr) {
+                dom_element.style.direction = attr;
+            }
+        ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling display",
+            function (context, dom_element, isd_element, attr) {}
+        ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling displayAlign",
+            function (context, dom_element, isd_element, attr) {
+
+                /* see https://css-tricks.com/snippets/css/a-guide-to-flexbox/ */
+
+                /* TODO: is this affected by writing direction? */
+
+                dom_element.style.display = "flex";
+                dom_element.style.flexDirection = "column";
+
+
+                if (attr === "before") {
+
+                    dom_element.style.justifyContent = "flex-start";
+
+                } else if (attr === "center") {
+
+                    dom_element.style.justifyContent = "center";
+
+                } else if (attr === "after") {
+
+                    dom_element.style.justifyContent = "flex-end";
                 }
+
+            }
         ),
         new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling color",
-                function (context, dom_element, isd_element, attr) {
-                    dom_element.style.color = "rgba(" +
-                            attr[0].toString() + "," +
-                            attr[1].toString() + "," +
-                            attr[2].toString() + "," +
-                            (attr[3] / 255).toString() +
-                            ")";
-                }
-        ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling direction",
-                function (context, dom_element, isd_element, attr) {
-                    dom_element.style.direction = attr;
-                }
-        ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling display",
-                function (context, dom_element, isd_element, attr) {}
-        ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling displayAlign",
-                function (context, dom_element, isd_element, attr) {
+            "http://www.w3.org/ns/ttml#styling extent",
+            function (context, dom_element, isd_element, attr) {
+                /* TODO: this is super ugly */
 
-                    /* see https://css-tricks.com/snippets/css/a-guide-to-flexbox/ */
+                context.regionH = (attr.h * context.h);
+                context.regionW = (attr.w * context.w);
 
-                    /* TODO: is this affected by writing direction? */
+                /* 
+                 * CSS height/width are measured against the content rectangle,
+                 * whereas TTML height/width include padding
+                 */
 
-                    dom_element.style.display = "flex";
-                    dom_element.style.flexDirection = "column";
+                var hdelta = 0;
+                var wdelta = 0;
 
+                var p = isd_element.styleAttrs["http://www.w3.org/ns/ttml#styling padding"];
 
-                    if (attr === "before") {
+                if (!p) {
 
-                        dom_element.style.justifyContent = "flex-start";
+                    /* error */
 
-                    } else if (attr === "center") {
+                } else {
 
-                        dom_element.style.justifyContent = "center";
-
-                    } else if (attr === "after") {
-
-                        dom_element.style.justifyContent = "flex-end";
-                    }
+                    hdelta = (p[0] + p[2]) * context.h;
+                    wdelta = (p[1] + p[3]) * context.w;
 
                 }
+
+                dom_element.style.height = (context.regionH - hdelta) + "px";
+                dom_element.style.width = (context.regionW - wdelta) + "px";
+
+            }
         ),
         new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling extent",
-                function (context, dom_element, isd_element, attr) {
-                    /* TODO: this is super ugly */
+            "http://www.w3.org/ns/ttml#styling fontFamily",
+            function (context, dom_element, isd_element, attr) {
 
-                    context.regionH = (attr.h * context.h);
-                    context.regionW = (attr.w * context.w);
+                var rslt = [];
 
-                    /* 
-                     * CSS height/width are measured against the content rectangle,
-                     * whereas TTML height/width include padding
-                     */
+                /* per IMSC1 */
 
-                    var hdelta = 0;
-                    var wdelta = 0;
+                for (var i in attr) {
 
-                    var p = isd_element.styleAttrs["http://www.w3.org/ns/ttml#styling padding"];
+                    if (attr[i] === "monospaceSerif") {
 
-                    if (!p) {
+                        rslt.push("Courier New");
+                        rslt.push('"Liberation Mono"');
+                        rslt.push("Courier");
+                        rslt.push("monospace");
 
-                        /* error */
+                    } else if (attr[i] === "proportionalSansSerif") {
+
+                        rslt.push("Arial");
+                        rslt.push("Helvetica");
+                        rslt.push('"Liberation Sans"');
+                        rslt.push("sans-serif");
+
+                    } else if (attr[i] === "monospace") {
+
+                        rslt.push("monospace");
+
+                    } else if (attr[i] === "sansSerif") {
+
+                        rslt.push("sans-serif");
+
+                    } else if (attr[i] === "serif") {
+
+                        rslt.push("serif");
+
+                    } else if (attr[i] === "monospaceSansSerif") {
+
+                        rslt.push("Consolas");
+                        rslt.push("monospace");
+
+                    } else if (attr[i] === "proportionalSerif") {
+
+                        rslt.push("serif");
 
                     } else {
 
-                        hdelta = (p[0] + p[2]) * context.h;
-                        wdelta = (p[1] + p[3]) * context.w;
+                        rslt.push(attr[i]);
 
                     }
 
-                    dom_element.style.height = (context.regionH - hdelta) + "px";
-                    dom_element.style.width = (context.regionW - wdelta) + "px";
-
                 }
+
+                dom_element.style.fontFamily = rslt.join(",");
+            }
+        ),
+
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling fontSize",
+            function (context, dom_element, isd_element, attr) {
+                dom_element.style.fontSize = (attr * context.h) + "px";
+            }
+        ),
+
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling fontStyle",
+            function (context, dom_element, isd_element, attr) {
+                dom_element.style.fontStyle = attr;
+            }
         ),
         new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling fontFamily",
-                function (context, dom_element, isd_element, attr) {
+            "http://www.w3.org/ns/ttml#styling fontWeight",
+            function (context, dom_element, isd_element, attr) {
+                dom_element.style.fontWeight = attr;
+            }
+        ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling lineHeight",
+            function (context, dom_element, isd_element, attr) {
+                if (attr === "normal") {
 
-                    var rslt = [];
+                    dom_element.style.lineHeight = "normal";
 
-                    /* per IMSC1 */
+                } else {
 
-                    for (var i in attr) {
+                    dom_element.style.lineHeight = (attr * context.h) + "px";
+                }
+            }
+        ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling opacity",
+            function (context, dom_element, isd_element, attr) {
+                dom_element.style.opacity = attr;
+            }
+        ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling origin",
+            function (context, dom_element, isd_element, attr) {
+                dom_element.style.top = (attr.h * context.h) + "px";
+                dom_element.style.left = (attr.w * context.w) + "px";
+            }
+        ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling overflow",
+            function (context, dom_element, isd_element, attr) {
+                dom_element.style.overflow = attr;
+            }
+        ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling padding",
+            function (context, dom_element, isd_element, attr) {
 
-                        if (attr[i] === "monospaceSerif") {
+                /* attr: top,left,bottom,right*/
 
-                            rslt.push("Courier New");
-                            rslt.push('"Liberation Mono"');
-                            rslt.push("Courier");
-                            rslt.push("monospace");
+                /* style: top right bottom left*/
 
-                        } else if (attr[i] === "proportionalSansSerif") {
+                var rslt = [];
 
-                            rslt.push("Arial");
-                            rslt.push("Helvetica");
-                            rslt.push('"Liberation Sans"');
-                            rslt.push("sans-serif");
+                rslt[0] = (attr[0] * context.h) + "px";
+                rslt[1] = (attr[3] * context.w) + "px";
+                rslt[2] = (attr[2] * context.h) + "px";
+                rslt[3] = (attr[1] * context.w) + "px";
 
-                        } else if (attr[i] === "monospace") {
+                dom_element.style.padding = rslt.join(" ");
+            }
+        ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling showBackground",
+            null
+            ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling textAlign",
+            function (context, dom_element, isd_element, attr) {
 
-                            rslt.push("monospace");
+                var ta;
+                var dir = isd_element.styleAttrs[imscStyles.byName.direction.qname];
 
-                        } else if (attr[i] === "sansSerif") {
+                /* handle UAs that do not understand start or end */
 
-                            rslt.push("sans-serif");
+                if (attr === "start") {
 
-                        } else if (attr[i] === "serif") {
+                    ta = (dir === "rtl") ? "right" : "left";
 
-                            rslt.push("serif");
+                } else if (attr === "end") {
 
-                        } else if (attr[i] === "monospaceSansSerif") {
+                    ta = (dir === "rtl") ? "left" : "right";
 
-                            rslt.push("Consolas");
-                            rslt.push("monospace");
+                } else {
 
-                        } else if (attr[i] === "proportionalSerif") {
+                    ta = attr;
 
-                            rslt.push("serif");
+                }
 
-                        } else {
+                dom_element.style.textAlign = ta;
 
-                            rslt.push(attr[i]);
+            }
+        ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling textDecoration",
+            function (context, dom_element, isd_element, attr) {
+                dom_element.style.textDecoration = attr.join(" ").replace("lineThrough", "line-through");
+            }
+        ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling textOutline",
+            function (context, dom_element, isd_element, attr) {
 
-                        }
+                if (attr === "none") {
 
+                    dom_element.style.textShadow = "";
+
+                } else {
+
+                    dom_element.style.textShadow = "rgba(" +
+                        attr.color[0].toString() + "," +
+                        attr.color[1].toString() + "," +
+                        attr.color[2].toString() + "," +
+                        (attr.color[3] / 255).toString() +
+                        ")" + " 0px 0px " +
+                        (attr.thickness * context.h) + "px";
+
+                }
+            }
+        ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling unicodeBidi",
+            function (context, dom_element, isd_element, attr) {
+
+                var ub;
+
+                if (attr === 'bidiOverride') {
+                    ub = "bidi-override";
+                } else {
+                    ub = attr;
+                }
+
+                dom_element.style.unicodeBidi = ub;
+            }
+        ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling visibility",
+            function (context, dom_element, isd_element, attr) {
+                dom_element.style.visibility = attr;
+            }
+        ),
+        new HTMLStylingMapDefintion(
+            "http://www.w3.org/ns/ttml#styling wrapOption",
+            function (context, dom_element, isd_element, attr) {
+
+                if (attr === "wrap") {
+
+                    if (isd_element.space === "preserve") {
+                        dom_element.style.whiteSpace = "pre-wrap";
+                    } else {
+                        dom_element.style.whiteSpace = "normal";
                     }
 
-                    dom_element.style.fontFamily = rslt.join(",");
-                }
-        ),
+                } else {
 
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling fontSize",
-                function (context, dom_element, isd_element, attr) {
-                    dom_element.style.fontSize = (attr * context.h) + "px";
-                }
-        ),
+                    if (isd_element.space === "preserve") {
 
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling fontStyle",
-                function (context, dom_element, isd_element, attr) {
-                    dom_element.style.fontStyle = attr;
-                }
-        ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling fontWeight",
-                function (context, dom_element, isd_element, attr) {
-                    dom_element.style.fontWeight = attr;
-                }
-        ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling lineHeight",
-                function (context, dom_element, isd_element, attr) {
-                    if (attr === "normal") {
-
-                        dom_element.style.lineHeight = "normal";
+                        dom_element.style.whiteSpace = "pre";
 
                     } else {
-
-                        dom_element.style.lineHeight = (attr * context.h) + "px";
-                    }
-                }
-        ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling opacity",
-                function (context, dom_element, isd_element, attr) {
-                    dom_element.style.opacity = attr;
-                }
-        ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling origin",
-                function (context, dom_element, isd_element, attr) {
-                    dom_element.style.top = (attr.h * context.h) + "px";
-                    dom_element.style.left = (attr.w * context.w) + "px";
-                }
-        ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling overflow",
-                function (context, dom_element, isd_element, attr) {
-                    dom_element.style.overflow = attr;
-                }
-        ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling padding",
-                function (context, dom_element, isd_element, attr) {
-
-                    /* attr: top,left,bottom,right*/
-
-                    /* style: top right bottom left*/
-
-                    var rslt = [];
-
-                    rslt[0] = (attr[0] * context.h) + "px";
-                    rslt[1] = (attr[3] * context.w) + "px";
-                    rslt[2] = (attr[2] * context.h) + "px";
-                    rslt[3] = (attr[1] * context.w) + "px";
-
-                    dom_element.style.padding = rslt.join(" ");
-                }
-        ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling showBackground",
-                null
-                ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling textAlign",
-                function (context, dom_element, isd_element, attr) {
-
-                    var ta;
-                    var dir = isd_element.styleAttrs[imscStyles.byName.direction.qname];
-
-                    /* handle UAs that do not understand start or end */
-
-                    if (attr === "start") {
-
-                        ta = (dir === "rtl") ? "right" : "left";
-
-                    } else if (attr === "end") {
-
-                        ta = (dir === "rtl") ? "left" : "right";
-
-                    } else {
-
-                        ta = attr;
-
-                    }
-
-                    dom_element.style.textAlign = ta;
-
-                }
-        ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling textDecoration",
-                function (context, dom_element, isd_element, attr) {
-                    dom_element.style.textDecoration = attr.join(" ").replace("lineThrough", "line-through");
-                }
-        ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling textOutline",
-                function (context, dom_element, isd_element, attr) {
-
-                    if (attr === "none") {
-
-                        dom_element.style.textShadow = "";
-
-                    } else {
-
-                        dom_element.style.textShadow = "rgba(" +
-                                attr.color[0].toString() + "," +
-                                attr.color[1].toString() + "," +
-                                attr.color[2].toString() + "," +
-                                (attr.color[3] / 255).toString() +
-                                ")" + " 0px 0px " +
-                                (attr.thickness * context.h) + "px";
-
-                    }
-                }
-        ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling unicodeBidi",
-                function (context, dom_element, isd_element, attr) {
-
-                    var ub;
-
-                    if (attr === 'bidiOverride') {
-                        ub = "bidi-override";
-                    } else {
-                        ub = attr;
-                    }
-
-                    dom_element.style.unicodeBidi = ub;
-                }
-        ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling visibility",
-                function (context, dom_element, isd_element, attr) {
-                    dom_element.style.visibility = attr;
-                }
-        ),
-        new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling wrapOption",
-                function (context, dom_element, isd_element, attr) {
-
-                    if (attr === "wrap") {
-
-                        if (isd_element.space === "preserve") {
-                            dom_element.style.whiteSpace = "pre-wrap";
-                        } else {
-                            dom_element.style.whiteSpace = "normal";
-                        }
-
-                    } else {
-
-                        if (isd_element.space === "preserve") {
-
-                            dom_element.style.whiteSpace = "pre";
-
-                        } else {
-                            dom_element.style.whiteSpace = "noWrap";
-                        }
-
+                        dom_element.style.whiteSpace = "noWrap";
                     }
 
                 }
+
+            }
         ),
         new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling writingMode",
-                function (context, dom_element, isd_element, attr) {
-                    if (attr === "lrtb" || attr === "lr") {
+            "http://www.w3.org/ns/ttml#styling writingMode",
+            function (context, dom_element, isd_element, attr) {
+                if (attr === "lrtb" || attr === "lr") {
 
-                        dom_element.style.writingMode = "horizontal-tb";
+                    dom_element.style.writingMode = "horizontal-tb";
 
-                    } else if (attr === "rltb" || attr === "rl") {
+                } else if (attr === "rltb" || attr === "rl") {
 
-                        dom_element.style.writingMode = "horizontal-tb";
+                    dom_element.style.writingMode = "horizontal-tb";
 
-                    } else if (attr === "tblr") {
+                } else if (attr === "tblr") {
 
-                        dom_element.style.writingMode = "vertical-lr";
+                    dom_element.style.writingMode = "vertical-lr";
 
-                    } else if (attr === "tbrl" || attr === "tb") {
+                } else if (attr === "tbrl" || attr === "tb") {
 
-                        dom_element.style.writingMode = "vertical-rl";
+                    dom_element.style.writingMode = "vertical-rl";
 
-                    }
                 }
+            }
         ),
         new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml#styling zIndex",
-                function (context, dom_element, isd_element, attr) {
-                    dom_element.style.zIndex = attr;
-                }
+            "http://www.w3.org/ns/ttml#styling zIndex",
+            function (context, dom_element, isd_element, attr) {
+                dom_element.style.zIndex = attr;
+            }
         ),
         new HTMLStylingMapDefintion(
-                "http://www.smpte-ra.org/schemas/2052-1/2010/smpte-tt backgroundImage",
-                function (context, dom_element, isd_element, attr) {
+            "http://www.smpte-ra.org/schemas/2052-1/2010/smpte-tt backgroundImage",
+            function (context, dom_element, isd_element, attr) {
 
-                    if (context.imgResolver !== null && attr !== null) {
+                if (context.imgResolver !== null && attr !== null) {
 
-                        var img = document.createElement("img");
-                                                
-                        var uri = context.imgResolver(attr, img);
-                        
-                        if (uri) img.src = uri;
-                        
-                        img.height = context.regionH;
-                        img.width = context.regionW;
+                    var img = document.createElement("img");
 
-                        dom_element.appendChild(img);
-                    }
+                    var uri = context.imgResolver(attr, img);
+
+                    if (uri) img.src = uri;
+
+                    img.height = context.regionH;
+                    img.width = context.regionW;
+
+                    dom_element.appendChild(img);
                 }
+            }
         ),
         new HTMLStylingMapDefintion(
-                "http://www.w3.org/ns/ttml/profile/imsc1#styling forcedDisplay",
-                function (context, dom_element, isd_element, attr) {
-                    
-                    if (context.displayForcedOnlyMode && attr === false) {
-                        dom_element.style.visibility =  "hidden";
-                    }
-                    
+            "http://www.w3.org/ns/ttml/profile/imsc1#styling forcedDisplay",
+            function (context, dom_element, isd_element, attr) {
+
+                if (context.displayForcedOnlyMode && attr === false) {
+                    dom_element.style.visibility = "hidden";
                 }
+
+            }
         )
     ];
 
@@ -8414,10 +8340,17 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
         STYLMAP_BY_QNAME[STYLING_MAP_DEFS[i].qname] = STYLING_MAP_DEFS[i];
     }
+    
+    function reportError(errorHandler, msg) {
+
+        if (errorHandler && errorHandler.error && errorHandler.error(msg))
+            throw msg;
+
+    }
 
 })(typeof exports === 'undefined' ? this.imscHTML = {} : exports,
-        typeof imscNames === 'undefined' ? _dereq_(21) : imscNames,
-        typeof imscStyles === 'undefined' ? _dereq_(22) : imscStyles);
+    typeof imscNames === 'undefined' ? _dereq_(21) : imscNames,
+    typeof imscStyles === 'undefined' ? _dereq_(22) : imscStyles);
 },{"21":21,"22":22}],19:[function(_dereq_,module,exports){
 /* 
  * Copyright (c) 2016, Pierre-Anthony Lemieux <pal@sandflow.com>
@@ -8512,9 +8445,17 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
          *   region later on)
          * - the element is terminal and the associated region is not the parent region
          */
+        
+        /* TODO: improve detection of terminal elements since <region> has no contents */
 
-        if (associated_region_id !== region.id &&
-                (('contents' in elem && elem.contents.length === 0) || associated_region_id !== ''))
+        if (parent !== null /* are we in the region element */ &&
+            associated_region_id !== region.id &&
+                (
+                    (! ('contents' in elem)) ||
+                    ('contents' in elem && elem.contents.length === 0) ||
+                    associated_region_id !== ''
+                )
+             )
             return null;
 
         /* create an ISD element, including applying specified styles */
@@ -8549,7 +8490,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
              */
 
             if (qname === imscStyles.byName.writingMode.qname &&
-                    !(imscStyles.byName.direction.qname in isd_element.styleAttrs)) {
+                !(imscStyles.byName.direction.qname in isd_element.styleAttrs)) {
 
                 var wm = isd_element.styleAttrs[qname];
 
@@ -8591,24 +8532,24 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
                     } else if (es.indexOf("none") === -1) {
 
                         if ((es.indexOf("noUnderline") === -1 &&
-                                ps.indexOf("underline") !== -1) ||
-                                es.indexOf("underline") !== -1) {
+                            ps.indexOf("underline") !== -1) ||
+                            es.indexOf("underline") !== -1) {
 
                             outs.push("underline");
 
                         }
 
                         if ((es.indexOf("noLineThrough") === -1 &&
-                                ps.indexOf("lineThrough") !== -1) ||
-                                es.indexOf("lineThrough") !== -1) {
+                            ps.indexOf("lineThrough") !== -1) ||
+                            es.indexOf("lineThrough") !== -1) {
 
                             outs.push("lineThrough");
 
                         }
 
                         if ((es.indexOf("noOverline") === -1 &&
-                                ps.indexOf("overline") !== -1) ||
-                                es.indexOf("overline") !== -1) {
+                            ps.indexOf("overline") !== -1) ||
+                            es.indexOf("overline") !== -1) {
 
                             outs.push("overline");
 
@@ -8623,8 +8564,8 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
                     isd_element.styleAttrs[sa.qname] = outs;
 
                 } else if (sa.inherit &&
-                        (sa.qname in parent.styleAttrs) &&
-                        !(sa.qname in isd_element.styleAttrs)) {
+                    (sa.qname in parent.styleAttrs) &&
+                    !(sa.qname in isd_element.styleAttrs)) {
 
                     isd_element.styleAttrs[sa.qname] = parent.styleAttrs[sa.qname];
 
@@ -8670,19 +8611,18 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
             if (cs.compute !== null) {
 
                 var cstyle = cs.compute(
-                        /*doc, parent, element, attr*/
-                        doc,
-                        parent,
-                        isd_element,
-                        isd_element.styleAttrs[cs.qname]
-                        );
+                    /*doc, parent, element, attr*/
+                    doc,
+                    parent,
+                    isd_element,
+                    isd_element.styleAttrs[cs.qname]
+                    );
 
-
-                isd_element.styleAttrs[cs.qname] = cstyle;
-
-
-                // reportError(errorHandler, "Style '" + sa.qname + "' on element '" + isd_element.kind + "' cannot be computed");
-
+                if (cstyle !== null) {
+                    isd_element.styleAttrs[cs.qname] = cstyle;
+                } else {
+                    reportError(errorHandler, "Style '" + cs.qname + "' on element '" + isd_element.kind + "' cannot be computed");
+                }
             }
 
         }
@@ -8693,33 +8633,33 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
             return null;
 
         /* process contents of the element */
-        
+
         var contents;
-        
+
         if (parent === null) {
 
-        /* we are processing the region */
-          
+            /* we are processing the region */
+
             if (body === null) {
-                
+
                 /* if there is no body, still process the region but with empty content */
 
                 contents = [];
 
             } else {
-                
+
                 /*use the body element as contents */
 
                 contents = [body];
 
             }
-        
-        } else {
-            
+
+        } else if ('contents' in elem) {
+
             contents = elem.contents;
-            
+
         }
-        
+
         for (var x in contents) {
 
             var c = isdProcessContentElement(doc, offset, region, body, isd_element, associated_region_id, contents[x]);
@@ -8759,19 +8699,110 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
         /* collapse white space if space is "default" */
 
-        if (isd_element.kind === 'span' && isd_element.text !== null && isd_element.space === "default") {
+        if (isd_element.kind === 'span' && isd_element.text && isd_element.space === "default") {
 
             var trimmedspan = isd_element.text.replace(/\s+/g, ' ');
 
-            if (trimmedspan.length === 0) {
+            isd_element.text = trimmedspan;
 
-                isd_element.text = null;
+        }
 
-            } else {
+        /* trim whitespace around explicit line breaks */
 
-                isd_element.text = trimmedspan;
+        if (isd_element.kind === 'p') {
+
+            var elist = [];
+
+            constructSpanList(isd_element, elist);
+
+            var l = 0;
+
+            var state = "after_br";
+            var br_pos = 0;
+
+            while (true) {
+
+                if (state === "after_br") {
+
+                    if (l >= elist.length || elist[l].kind === "br") {
+
+                        state = "before_br";
+                        br_pos = l;
+                        l--;
+
+                    } else {
+
+                        if (elist[l].space !== "preserve") {
+
+                            elist[l].text = elist[l].text.replace(/^\s+/g, '');
+
+                        }
+
+                        if (elist[l].text.length > 0) {
+
+                            state = "looking_br";
+                            l++;
+
+                        } else {
+
+                            elist.splice(l, 1);
+
+                        }
+
+                    }
+
+                } else if (state === "before_br") {
+
+                    if (l < 0 || elist[l].kind === "br") {
+
+                        state = "after_br";
+                        l = br_pos + 1;
+
+                        if (l >= elist.length) break;
+
+                    } else {
+
+                        if (elist[l].space !== "preserve") {
+
+                            elist[l].text = elist[l].text.replace(/\s+$/g, '');
+
+                        }
+
+                        if (elist[l].text.length > 0) {
+
+                            state = "after_br";
+                            l = br_pos + 1;
+
+                            if (l >= elist.length) break;
+
+                        } else {
+
+                            elist.splice(l, 1);
+                            l--;
+
+                        }
+
+                    }
+
+                } else {
+
+                    if (l >= elist.length || elist[l].kind === "br") {
+
+                        state = "before_br";
+                        br_pos = l;
+                        l--;
+
+                    } else {
+
+                        l++;
+
+                    }
+
+                }
 
             }
+            
+            pruneEmptySpans(isd_element);
 
         }
 
@@ -8784,11 +8815,11 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
          */
 
         if ((isd_element.kind === 'div' && imscStyles.byName.backgroundImage.qname in isd_element.styleAttrs) ||
-                isd_element.kind === 'br' ||
-                isd_element.contents.length > 0 ||
-                (isd_element.kind === 'span' && isd_element.text !== null) ||
-                (isd_element.kind === 'region' &&
-                        isd_element.styleAttrs[imscStyles.byName.showBackground.qname] === 'always')) {
+            isd_element.kind === 'br' ||
+            ('contents' in isd_element && isd_element.contents.length > 0) ||
+            (isd_element.kind === 'span' && isd_element.text !== null) ||
+            (isd_element.kind === 'region' &&
+                isd_element.styleAttrs[imscStyles.byName.showBackground.qname] === 'always')) {
 
             return {
                 region_id: associated_region_id,
@@ -8797,6 +8828,49 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
         }
 
         return null;
+    }
+
+    function constructSpanList(element, elist) {
+
+        if ('contents' in element) {
+
+            for (var i in element.contents) {
+                constructSpanList(element.contents[i], elist);
+            }
+
+        } else {
+
+            elist.push(element);
+
+        }
+
+    }
+
+    function pruneEmptySpans(element) {
+
+        if (element.kind === 'br') {
+            
+            return false;
+            
+        } else if ('text' in element) {
+            
+            return  element.text.length === 0;
+            
+        } else if ('contents' in element) {
+            
+            var i = element.contents.length;
+
+            while (i--) {
+                
+                if (pruneEmptySpans(element.contents[i])) {
+                    element.contents.splice(i, 1);
+                }
+                
+            }
+            
+            return element.contents.length === 0;
+
+        }
     }
 
     function ISD(tt) {
@@ -8816,10 +8890,8 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
         for (var sname in ttelem.styleAttrs) {
 
             this.styleAttrs[sname] =
-                    ttelem.styleAttrs[sname];
+                ttelem.styleAttrs[sname];
         }
-
-        this.contents = [];
 
         /* TODO: clean this! */
 
@@ -8827,6 +8899,9 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
             this.text = ttelem.text;
 
+        } else if (ttelem.kind !== 'br') {
+            
+            this.contents = [];
         }
 
         if ('space' in ttelem) {
@@ -8873,9 +8948,9 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
 
 
 })(typeof exports === 'undefined' ? this.imscISD = {} : exports,
-        typeof imscNames === 'undefined' ? _dereq_(21) : imscNames,
-        typeof imscStyles === 'undefined' ? _dereq_(22) : imscStyles
-        );
+    typeof imscNames === 'undefined' ? _dereq_(21) : imscNames,
+    typeof imscStyles === 'undefined' ? _dereq_(22) : imscStyles
+    );
 
 },{"21":21,"22":22}],20:[function(_dereq_,module,exports){
 /* 
@@ -9980,7 +10055,7 @@ if (typeof Object.create === 'function') {
 /*!
  * Determine if an object is a Buffer
  *
- * @author   Feross Aboukhadijeh <feross@feross.org> <http://feross.org>
+ * @author   Feross Aboukhadijeh <https://feross.org>
  * @license  MIT
  */
 
@@ -10013,9 +10088,9 @@ module.exports = Array.isArray || function (arr) {
 if (!process.version ||
     process.version.indexOf('v0.') === 0 ||
     process.version.indexOf('v1.') === 0 && process.version.indexOf('v1.8.') !== 0) {
-  module.exports = nextTick;
+  module.exports = { nextTick: nextTick };
 } else {
-  module.exports = process.nextTick;
+  module.exports = process
 }
 
 function nextTick(fn, arg1, arg2, arg3) {
@@ -10051,6 +10126,7 @@ function nextTick(fn, arg1, arg2, arg3) {
     });
   }
 }
+
 
 }).call(this,_dereq_(28))
 
@@ -10274,7 +10350,7 @@ module.exports = _dereq_(30);
 
 /*<replacement>*/
 
-var processNextTick = _dereq_(27);
+var pna = _dereq_(27);
 /*</replacement>*/
 
 /*<replacement>*/
@@ -10298,10 +10374,13 @@ var Writable = _dereq_(34);
 
 util.inherits(Duplex, Readable);
 
-var keys = objectKeys(Writable.prototype);
-for (var v = 0; v < keys.length; v++) {
-  var method = keys[v];
-  if (!Duplex.prototype[method]) Duplex.prototype[method] = Writable.prototype[method];
+{
+  // avoid scope creep, the keys array can then be collected
+  var keys = objectKeys(Writable.prototype);
+  for (var v = 0; v < keys.length; v++) {
+    var method = keys[v];
+    if (!Duplex.prototype[method]) Duplex.prototype[method] = Writable.prototype[method];
+  }
 }
 
 function Duplex(options) {
@@ -10320,6 +10399,16 @@ function Duplex(options) {
   this.once('end', onend);
 }
 
+Object.defineProperty(Duplex.prototype, 'writableHighWaterMark', {
+  // making it explicit this property is not enumerable
+  // because otherwise some prototype manipulation in
+  // userland will fail
+  enumerable: false,
+  get: function () {
+    return this._writableState.highWaterMark;
+  }
+});
+
 // the no-half-open enforcer
 function onend() {
   // if we allow half-open state, or if the writable side ended,
@@ -10328,7 +10417,7 @@ function onend() {
 
   // no more data can be written.
   // But allow more writes to happen in this tick.
-  processNextTick(onEndNT, this);
+  pna.nextTick(onEndNT, this);
 }
 
 function onEndNT(self) {
@@ -10360,14 +10449,8 @@ Duplex.prototype._destroy = function (err, cb) {
   this.push(null);
   this.end();
 
-  processNextTick(cb, err);
+  pna.nextTick(cb, err);
 };
-
-function forEach(xs, f) {
-  for (var i = 0, l = xs.length; i < l; i++) {
-    f(xs[i], i);
-  }
-}
 },{"11":11,"24":24,"27":27,"32":32,"34":34}],31:[function(_dereq_,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -10443,7 +10526,7 @@ PassThrough.prototype._transform = function (chunk, encoding, cb) {
 
 /*<replacement>*/
 
-var processNextTick = _dereq_(27);
+var pna = _dereq_(27);
 /*</replacement>*/
 
 module.exports = Readable;
@@ -10470,9 +10553,8 @@ var EElistenerCount = function (emitter, type) {
 var Stream = _dereq_(37);
 /*</replacement>*/
 
-// TODO(bmeurer): Change this back to const once hole checks are
-// properly optimized away early in Ignition+TurboFan.
 /*<replacement>*/
+
 var Buffer = _dereq_(43).Buffer;
 var OurUint8Array = global.Uint8Array || function () {};
 function _uint8ArrayToBuffer(chunk) {
@@ -10481,6 +10563,7 @@ function _uint8ArrayToBuffer(chunk) {
 function _isUint8Array(obj) {
   return Buffer.isBuffer(obj) || obj instanceof OurUint8Array;
 }
+
 /*</replacement>*/
 
 /*<replacement>*/
@@ -10509,15 +10592,13 @@ var kProxyEvents = ['error', 'close', 'destroy', 'pause', 'resume'];
 function prependListener(emitter, event, fn) {
   // Sadly this is not cacheable as some libraries bundle their own
   // event emitter implementation with them.
-  if (typeof emitter.prependListener === 'function') {
-    return emitter.prependListener(event, fn);
-  } else {
-    // This is a hack to make sure that our error handler is attached before any
-    // userland ones.  NEVER DO THIS. This is here only because this code needs
-    // to continue to work with older versions of Node.js that do not include
-    // the prependListener() method. The goal is to eventually remove this hack.
-    if (!emitter._events || !emitter._events[event]) emitter.on(event, fn);else if (isArray(emitter._events[event])) emitter._events[event].unshift(fn);else emitter._events[event] = [fn, emitter._events[event]];
-  }
+  if (typeof emitter.prependListener === 'function') return emitter.prependListener(event, fn);
+
+  // This is a hack to make sure that our error handler is attached before any
+  // userland ones.  NEVER DO THIS. This is here only because this code needs
+  // to continue to work with older versions of Node.js that do not include
+  // the prependListener() method. The goal is to eventually remove this hack.
+  if (!emitter._events || !emitter._events[event]) emitter.on(event, fn);else if (isArray(emitter._events[event])) emitter._events[event].unshift(fn);else emitter._events[event] = [fn, emitter._events[event]];
 }
 
 function ReadableState(options, stream) {
@@ -10525,17 +10606,26 @@ function ReadableState(options, stream) {
 
   options = options || {};
 
+  // Duplex streams are both readable and writable, but share
+  // the same options object.
+  // However, some cases require setting options to different
+  // values for the readable and the writable sides of the duplex stream.
+  // These options can be provided separately as readableXXX and writableXXX.
+  var isDuplex = stream instanceof Duplex;
+
   // object stream flag. Used to make read(n) ignore n and to
   // make all the buffer merging and length checks go away
   this.objectMode = !!options.objectMode;
 
-  if (stream instanceof Duplex) this.objectMode = this.objectMode || !!options.readableObjectMode;
+  if (isDuplex) this.objectMode = this.objectMode || !!options.readableObjectMode;
 
   // the point at which it stops calling _read() to fill the buffer
   // Note: 0 is a valid value, means "don't call _read preemptively ever"
   var hwm = options.highWaterMark;
+  var readableHwm = options.readableHighWaterMark;
   var defaultHwm = this.objectMode ? 16 : 16 * 1024;
-  this.highWaterMark = hwm || hwm === 0 ? hwm : defaultHwm;
+
+  if (hwm || hwm === 0) this.highWaterMark = hwm;else if (isDuplex && (readableHwm || readableHwm === 0)) this.highWaterMark = readableHwm;else this.highWaterMark = defaultHwm;
 
   // cast to ints.
   this.highWaterMark = Math.floor(this.highWaterMark);
@@ -10908,7 +10998,7 @@ function emitReadable(stream) {
   if (!state.emittedReadable) {
     debug('emitReadable', state.flowing);
     state.emittedReadable = true;
-    if (state.sync) processNextTick(emitReadable_, stream);else emitReadable_(stream);
+    if (state.sync) pna.nextTick(emitReadable_, stream);else emitReadable_(stream);
   }
 }
 
@@ -10927,7 +11017,7 @@ function emitReadable_(stream) {
 function maybeReadMore(stream, state) {
   if (!state.readingMore) {
     state.readingMore = true;
-    processNextTick(maybeReadMore_, stream, state);
+    pna.nextTick(maybeReadMore_, stream, state);
   }
 }
 
@@ -10972,7 +11062,7 @@ Readable.prototype.pipe = function (dest, pipeOpts) {
   var doEnd = (!pipeOpts || pipeOpts.end !== false) && dest !== process.stdout && dest !== process.stderr;
 
   var endFn = doEnd ? onend : unpipe;
-  if (state.endEmitted) processNextTick(endFn);else src.once('end', endFn);
+  if (state.endEmitted) pna.nextTick(endFn);else src.once('end', endFn);
 
   dest.on('unpipe', onunpipe);
   function onunpipe(readable, unpipeInfo) {
@@ -11162,7 +11252,7 @@ Readable.prototype.on = function (ev, fn) {
       state.readableListening = state.needReadable = true;
       state.emittedReadable = false;
       if (!state.reading) {
-        processNextTick(nReadingNextTick, this);
+        pna.nextTick(nReadingNextTick, this);
       } else if (state.length) {
         emitReadable(this);
       }
@@ -11193,7 +11283,7 @@ Readable.prototype.resume = function () {
 function resume(stream, state) {
   if (!state.resumeScheduled) {
     state.resumeScheduled = true;
-    processNextTick(resume_, stream, state);
+    pna.nextTick(resume_, stream, state);
   }
 }
 
@@ -11230,18 +11320,19 @@ function flow(stream) {
 // This is *not* part of the readable stream interface.
 // It is an ugly unfortunate mess of history.
 Readable.prototype.wrap = function (stream) {
+  var _this = this;
+
   var state = this._readableState;
   var paused = false;
 
-  var self = this;
   stream.on('end', function () {
     debug('wrapped end');
     if (state.decoder && !state.ended) {
       var chunk = state.decoder.end();
-      if (chunk && chunk.length) self.push(chunk);
+      if (chunk && chunk.length) _this.push(chunk);
     }
 
-    self.push(null);
+    _this.push(null);
   });
 
   stream.on('data', function (chunk) {
@@ -11251,7 +11342,7 @@ Readable.prototype.wrap = function (stream) {
     // don't skip over falsy values in objectMode
     if (state.objectMode && (chunk === null || chunk === undefined)) return;else if (!state.objectMode && (!chunk || !chunk.length)) return;
 
-    var ret = self.push(chunk);
+    var ret = _this.push(chunk);
     if (!ret) {
       paused = true;
       stream.pause();
@@ -11272,12 +11363,12 @@ Readable.prototype.wrap = function (stream) {
 
   // proxy certain important events.
   for (var n = 0; n < kProxyEvents.length; n++) {
-    stream.on(kProxyEvents[n], self.emit.bind(self, kProxyEvents[n]));
+    stream.on(kProxyEvents[n], this.emit.bind(this, kProxyEvents[n]));
   }
 
   // when we try to consume some more bytes, simply unpause the
   // underlying stream.
-  self._read = function (n) {
+  this._read = function (n) {
     debug('wrapped _read', n);
     if (paused) {
       paused = false;
@@ -11285,8 +11376,18 @@ Readable.prototype.wrap = function (stream) {
     }
   };
 
-  return self;
+  return this;
 };
+
+Object.defineProperty(Readable.prototype, 'readableHighWaterMark', {
+  // making it explicit this property is not enumerable
+  // because otherwise some prototype manipulation in
+  // userland will fail
+  enumerable: false,
+  get: function () {
+    return this._readableState.highWaterMark;
+  }
+});
 
 // exposed for testing purposes only.
 Readable._fromList = fromList;
@@ -11400,7 +11501,7 @@ function endReadable(stream) {
 
   if (!state.endEmitted) {
     state.ended = true;
-    processNextTick(endReadableNT, state, stream);
+    pna.nextTick(endReadableNT, state, stream);
   }
 }
 
@@ -11410,12 +11511,6 @@ function endReadableNT(state, stream) {
     state.endEmitted = true;
     stream.readable = false;
     stream.emit('end');
-  }
-}
-
-function forEach(xs, f) {
-  for (var i = 0, l = xs.length; i < l; i++) {
-    f(xs[i], i);
   }
 }
 
@@ -11504,39 +11599,28 @@ util.inherits = _dereq_(24);
 
 util.inherits(Transform, Duplex);
 
-function TransformState(stream) {
-  this.afterTransform = function (er, data) {
-    return afterTransform(stream, er, data);
-  };
-
-  this.needTransform = false;
-  this.transforming = false;
-  this.writecb = null;
-  this.writechunk = null;
-  this.writeencoding = null;
-}
-
-function afterTransform(stream, er, data) {
-  var ts = stream._transformState;
+function afterTransform(er, data) {
+  var ts = this._transformState;
   ts.transforming = false;
 
   var cb = ts.writecb;
 
   if (!cb) {
-    return stream.emit('error', new Error('write callback called multiple times'));
+    return this.emit('error', new Error('write callback called multiple times'));
   }
 
   ts.writechunk = null;
   ts.writecb = null;
 
-  if (data !== null && data !== undefined) stream.push(data);
+  if (data != null) // single equals check for both `null` and `undefined`
+    this.push(data);
 
   cb(er);
 
-  var rs = stream._readableState;
+  var rs = this._readableState;
   rs.reading = false;
   if (rs.needReadable || rs.length < rs.highWaterMark) {
-    stream._read(rs.highWaterMark);
+    this._read(rs.highWaterMark);
   }
 }
 
@@ -11545,9 +11629,14 @@ function Transform(options) {
 
   Duplex.call(this, options);
 
-  this._transformState = new TransformState(this);
-
-  var stream = this;
+  this._transformState = {
+    afterTransform: afterTransform.bind(this),
+    needTransform: false,
+    transforming: false,
+    writecb: null,
+    writechunk: null,
+    writeencoding: null
+  };
 
   // start out asking for a readable event once data is transformed.
   this._readableState.needReadable = true;
@@ -11564,11 +11653,19 @@ function Transform(options) {
   }
 
   // When the writable side finishes, then flush out anything remaining.
-  this.once('prefinish', function () {
-    if (typeof this._flush === 'function') this._flush(function (er, data) {
-      done(stream, er, data);
-    });else done(stream);
-  });
+  this.on('prefinish', prefinish);
+}
+
+function prefinish() {
+  var _this = this;
+
+  if (typeof this._flush === 'function') {
+    this._flush(function (er, data) {
+      done(_this, er, data);
+    });
+  } else {
+    done(this, null, null);
+  }
 }
 
 Transform.prototype.push = function (chunk, encoding) {
@@ -11618,27 +11715,25 @@ Transform.prototype._read = function (n) {
 };
 
 Transform.prototype._destroy = function (err, cb) {
-  var _this = this;
+  var _this2 = this;
 
   Duplex.prototype._destroy.call(this, err, function (err2) {
     cb(err2);
-    _this.emit('close');
+    _this2.emit('close');
   });
 };
 
 function done(stream, er, data) {
   if (er) return stream.emit('error', er);
 
-  if (data !== null && data !== undefined) stream.push(data);
+  if (data != null) // single equals check for both `null` and `undefined`
+    stream.push(data);
 
   // if there's nothing in the write buffer, then that means
   // that nothing more will ever be provided
-  var ws = stream._writableState;
-  var ts = stream._transformState;
+  if (stream._writableState.length) throw new Error('Calling transform done when ws.length != 0');
 
-  if (ws.length) throw new Error('Calling transform done when ws.length != 0');
-
-  if (ts.transforming) throw new Error('Calling transform done when still transforming');
+  if (stream._transformState.transforming) throw new Error('Calling transform done when still transforming');
 
   return stream.push(null);
 }
@@ -11673,7 +11768,7 @@ function done(stream, er, data) {
 
 /*<replacement>*/
 
-var processNextTick = _dereq_(27);
+var pna = _dereq_(27);
 /*</replacement>*/
 
 module.exports = Writable;
@@ -11700,7 +11795,7 @@ function CorkedRequest(state) {
 /* </replacement> */
 
 /*<replacement>*/
-var asyncWrite = !process.browser && ['v0.10', 'v0.9.'].indexOf(process.version.slice(0, 5)) > -1 ? setImmediate : processNextTick;
+var asyncWrite = !process.browser && ['v0.10', 'v0.9.'].indexOf(process.version.slice(0, 5)) > -1 ? setImmediate : pna.nextTick;
 /*</replacement>*/
 
 /*<replacement>*/
@@ -11725,6 +11820,7 @@ var Stream = _dereq_(37);
 /*</replacement>*/
 
 /*<replacement>*/
+
 var Buffer = _dereq_(43).Buffer;
 var OurUint8Array = global.Uint8Array || function () {};
 function _uint8ArrayToBuffer(chunk) {
@@ -11733,6 +11829,7 @@ function _uint8ArrayToBuffer(chunk) {
 function _isUint8Array(obj) {
   return Buffer.isBuffer(obj) || obj instanceof OurUint8Array;
 }
+
 /*</replacement>*/
 
 var destroyImpl = _dereq_(36);
@@ -11746,18 +11843,27 @@ function WritableState(options, stream) {
 
   options = options || {};
 
+  // Duplex streams are both readable and writable, but share
+  // the same options object.
+  // However, some cases require setting options to different
+  // values for the readable and the writable sides of the duplex stream.
+  // These options can be provided separately as readableXXX and writableXXX.
+  var isDuplex = stream instanceof Duplex;
+
   // object stream flag to indicate whether or not this stream
   // contains buffers or objects.
   this.objectMode = !!options.objectMode;
 
-  if (stream instanceof Duplex) this.objectMode = this.objectMode || !!options.writableObjectMode;
+  if (isDuplex) this.objectMode = this.objectMode || !!options.writableObjectMode;
 
   // the point at which write() starts returning false
   // Note: 0 is a valid value, means that we always return false if
   // the entire buffer is not flushed immediately on write()
   var hwm = options.highWaterMark;
+  var writableHwm = options.writableHighWaterMark;
   var defaultHwm = this.objectMode ? 16 : 16 * 1024;
-  this.highWaterMark = hwm || hwm === 0 ? hwm : defaultHwm;
+
+  if (hwm || hwm === 0) this.highWaterMark = hwm;else if (isDuplex && (writableHwm || writableHwm === 0)) this.highWaterMark = writableHwm;else this.highWaterMark = defaultHwm;
 
   // cast to ints.
   this.highWaterMark = Math.floor(this.highWaterMark);
@@ -11871,6 +11977,7 @@ if (typeof Symbol === 'function' && Symbol.hasInstance && typeof Function.protot
   Object.defineProperty(Writable, Symbol.hasInstance, {
     value: function (object) {
       if (realHasInstance.call(this, object)) return true;
+      if (this !== Writable) return false;
 
       return object && object._writableState instanceof WritableState;
     }
@@ -11922,7 +12029,7 @@ function writeAfterEnd(stream, cb) {
   var er = new Error('write after end');
   // TODO: defer error events consistently everywhere, not just the cb
   stream.emit('error', er);
-  processNextTick(cb, er);
+  pna.nextTick(cb, er);
 }
 
 // Checks that a user-supplied chunk is valid, especially for the particular
@@ -11939,7 +12046,7 @@ function validChunk(stream, state, chunk, cb) {
   }
   if (er) {
     stream.emit('error', er);
-    processNextTick(cb, er);
+    pna.nextTick(cb, er);
     valid = false;
   }
   return valid;
@@ -11948,7 +12055,7 @@ function validChunk(stream, state, chunk, cb) {
 Writable.prototype.write = function (chunk, encoding, cb) {
   var state = this._writableState;
   var ret = false;
-  var isBuf = _isUint8Array(chunk) && !state.objectMode;
+  var isBuf = !state.objectMode && _isUint8Array(chunk);
 
   if (isBuf && !Buffer.isBuffer(chunk)) {
     chunk = _uint8ArrayToBuffer(chunk);
@@ -12001,6 +12108,16 @@ function decodeChunk(state, chunk, encoding) {
   }
   return chunk;
 }
+
+Object.defineProperty(Writable.prototype, 'writableHighWaterMark', {
+  // making it explicit this property is not enumerable
+  // because otherwise some prototype manipulation in
+  // userland will fail
+  enumerable: false,
+  get: function () {
+    return this._writableState.highWaterMark;
+  }
+});
 
 // if we're already writing something, then just put this
 // in the queue, and wait our turn.  Otherwise, call _write
@@ -12059,10 +12176,10 @@ function onwriteError(stream, state, sync, er, cb) {
   if (sync) {
     // defer the callback if we are being called synchronously
     // to avoid piling up things on the stack
-    processNextTick(cb, er);
+    pna.nextTick(cb, er);
     // this can emit finish, and it will always happen
     // after error
-    processNextTick(finishMaybe, stream, state);
+    pna.nextTick(finishMaybe, stream, state);
     stream._writableState.errorEmitted = true;
     stream.emit('error', er);
   } else {
@@ -12160,6 +12277,7 @@ function clearBuffer(stream, state) {
     } else {
       state.corkedRequestsFree = new CorkedRequest(state);
     }
+    state.bufferedRequestCount = 0;
   } else {
     // Slow case, write chunks one-by-one
     while (entry) {
@@ -12170,6 +12288,7 @@ function clearBuffer(stream, state) {
 
       doWrite(stream, state, false, len, chunk, encoding, cb);
       entry = entry.next;
+      state.bufferedRequestCount--;
       // if we didn't call the onwrite immediately, then
       // it means that we need to wait until it does.
       // also, that means that the chunk and cb are currently
@@ -12182,7 +12301,6 @@ function clearBuffer(stream, state) {
     if (entry === null) state.lastBufferedRequest = null;
   }
 
-  state.bufferedRequestCount = 0;
   state.bufferedRequest = entry;
   state.bufferProcessing = false;
 }
@@ -12236,7 +12354,7 @@ function prefinish(stream, state) {
     if (typeof stream._final === 'function') {
       state.pendingcb++;
       state.finalCalled = true;
-      processNextTick(callFinal, stream, state);
+      pna.nextTick(callFinal, stream, state);
     } else {
       state.prefinished = true;
       stream.emit('prefinish');
@@ -12260,7 +12378,7 @@ function endWritable(stream, state, cb) {
   state.ending = true;
   finishMaybe(stream, state);
   if (cb) {
-    if (state.finished) processNextTick(cb);else stream.once('finish', cb);
+    if (state.finished) pna.nextTick(cb);else stream.once('finish', cb);
   }
   state.ended = true;
   stream.writable = false;
@@ -12313,12 +12431,10 @@ Writable.prototype._destroy = function (err, cb) {
 },{"11":11,"24":24,"27":27,"28":28,"30":30,"36":36,"37":37,"43":43,"47":47}],35:[function(_dereq_,module,exports){
 'use strict';
 
-/*<replacement>*/
-
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
 var Buffer = _dereq_(43).Buffer;
-/*</replacement>*/
+var util = _dereq_(7);
 
 function copyBuffer(src, target, offset) {
   src.copy(target, offset);
@@ -12385,12 +12501,19 @@ module.exports = function () {
 
   return BufferList;
 }();
-},{"43":43}],36:[function(_dereq_,module,exports){
+
+if (util && util.inspect && util.inspect.custom) {
+  module.exports.prototype[util.inspect.custom] = function () {
+    var obj = util.inspect({ length: this.length });
+    return this.constructor.name + ' ' + obj;
+  };
+}
+},{"43":43,"7":7}],36:[function(_dereq_,module,exports){
 'use strict';
 
 /*<replacement>*/
 
-var processNextTick = _dereq_(27);
+var pna = _dereq_(27);
 /*</replacement>*/
 
 // undocumented cb() API, needed for core, not for public API
@@ -12404,9 +12527,9 @@ function destroy(err, cb) {
     if (cb) {
       cb(err);
     } else if (err && (!this._writableState || !this._writableState.errorEmitted)) {
-      processNextTick(emitErrorNT, this, err);
+      pna.nextTick(emitErrorNT, this, err);
     }
-    return;
+    return this;
   }
 
   // we set destroyed to true before firing error callbacks in order
@@ -12423,7 +12546,7 @@ function destroy(err, cb) {
 
   this._destroy(err || null, function (err) {
     if (!cb && err) {
-      processNextTick(emitErrorNT, _this, err);
+      pna.nextTick(emitErrorNT, _this, err);
       if (_this._writableState) {
         _this._writableState.errorEmitted = true;
       }
@@ -12431,6 +12554,8 @@ function destroy(err, cb) {
       cb(err);
     }
   });
+
+  return this;
 }
 
 function undestroy() {
@@ -14309,9 +14434,33 @@ Stream.prototype.pipe = function(dest, options) {
 };
 
 },{"15":15,"24":24,"29":29,"38":38,"39":39,"40":40,"41":41}],46:[function(_dereq_,module,exports){
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 'use strict';
 
+/*<replacement>*/
+
 var Buffer = _dereq_(43).Buffer;
+/*</replacement>*/
 
 var isEncoding = Buffer.isEncoding || function (encoding) {
   encoding = '' + encoding;
@@ -14423,10 +14572,10 @@ StringDecoder.prototype.fillLast = function (buf) {
 };
 
 // Checks the type of a UTF-8 byte, whether it's ASCII, a leading byte, or a
-// continuation byte.
+// continuation byte. If an invalid byte is detected, -2 is returned.
 function utf8CheckByte(byte) {
   if (byte <= 0x7F) return 0;else if (byte >> 5 === 0x06) return 2;else if (byte >> 4 === 0x0E) return 3;else if (byte >> 3 === 0x1E) return 4;
-  return -1;
+  return byte >> 6 === 0x02 ? -1 : -2;
 }
 
 // Checks at most 3 bytes at the end of a Buffer in order to detect an
@@ -14440,13 +14589,13 @@ function utf8CheckIncomplete(self, buf, i) {
     if (nb > 0) self.lastNeed = nb - 1;
     return nb;
   }
-  if (--j < i) return 0;
+  if (--j < i || nb === -2) return 0;
   nb = utf8CheckByte(buf[j]);
   if (nb >= 0) {
     if (nb > 0) self.lastNeed = nb - 2;
     return nb;
   }
-  if (--j < i) return 0;
+  if (--j < i || nb === -2) return 0;
   nb = utf8CheckByte(buf[j]);
   if (nb >= 0) {
     if (nb > 0) {
@@ -14460,7 +14609,7 @@ function utf8CheckIncomplete(self, buf, i) {
 // Validates as many continuation bytes for a multi-byte UTF-8 character as
 // needed or are available. If we see a non-continuation byte where we expect
 // one, we "replace" the validated continuation bytes we've seen so far with
-// UTF-8 replacement characters ('\ufffd'), to match v8's UTF-8 decoding
+// a single UTF-8 replacement character ('\ufffd'), to match v8's UTF-8 decoding
 // behavior. The continuation byte check is included three times in the case
 // where all of the continuation bytes for a character exist in the same buffer.
 // It is also done this way as a slight performance increase instead of using a
@@ -14468,17 +14617,17 @@ function utf8CheckIncomplete(self, buf, i) {
 function utf8CheckExtraBytes(self, buf, p) {
   if ((buf[0] & 0xC0) !== 0x80) {
     self.lastNeed = 0;
-    return '\ufffd'.repeat(p);
+    return '\ufffd';
   }
   if (self.lastNeed > 1 && buf.length > 1) {
     if ((buf[1] & 0xC0) !== 0x80) {
       self.lastNeed = 1;
-      return '\ufffd'.repeat(p + 1);
+      return '\ufffd';
     }
     if (self.lastNeed > 2 && buf.length > 2) {
       if ((buf[2] & 0xC0) !== 0x80) {
         self.lastNeed = 2;
-        return '\ufffd'.repeat(p + 2);
+        return '\ufffd';
       }
     }
   }
@@ -14509,11 +14658,11 @@ function utf8Text(buf, i) {
   return buf.toString('utf8', i, end);
 }
 
-// For UTF-8, a replacement character for each buffered byte of a (partial)
-// character needs to be added to the output.
+// For UTF-8, a replacement character is added when ending on a partial
+// character.
 function utf8End(buf) {
   var r = buf && buf.length ? this.write(buf) : '';
-  if (this.lastNeed) return r + '\ufffd'.repeat(this.lastTotal - this.lastNeed);
+  if (this.lastNeed) return r + '\ufffd';
   return r;
 }
 
@@ -22666,7 +22815,7 @@ function ManifestLoader(config) {
                     // In the following, we only use the first Location entry even if many are available
                     // Compare with ManifestUpdater/DashManifestModel
                     if (manifest.hasOwnProperty(_constantsConstants2['default'].LOCATION)) {
-                        baseUri = urlUtils.parseBaseUrl(manifest.manifest.Location_asArray[0]);
+                        baseUri = urlUtils.parseBaseUrl(manifest.Location_asArray[0]);
                         log('BaseURI set by Location to: ' + baseUri);
                     }
 
